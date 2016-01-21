@@ -2,31 +2,6 @@
 
 class RestFilters
 {
-    
-    /*public function process()
-    {
-        $processed_rest = new Rest('');
-        if(strlen($this->original_rest->getRest())>0){
-            $get = array_change_key_case($this->original_rest->getAssociativeArray());
-            array_walk($get, $this->value_filter, $get);
-            foreach($get as $key => $value){
-                if(!isset($value)||is_null($value)||(is_string($value)&&strlen($value)===0)){
-                    /* do nothing /
-                } else
-                    $processed_rest->setValue($key, $value);
-            }
-        } else {
-            $processed_rest->setValue('splash_page', 'true');
-            $processed_rest->setValue('x', 'gallery_images');
-        }
-        error_log('processGet after scrubbing is x set: ' . print_r($processed_rest->hasKey('x'),true));
-        if(!$processed_rest->hasKey('x'))
-            $processed_rest->setValue('x', 'gallery_images');
-        error_log('processGet after presence of x question. $temp_array: ' . print_r($processed_rest, true)
-        . ' versus JSON encode: ' . print_r($processed_rest->getRest(), true));
-        return $processed_rest;//json_encode($temp_array);
-    }*/
-    
     public static function scrubRestPair(&$value, $key, $invokable_descr_filter = 'DescriptionFilter')
     {
         $description = json_decode(file_get_contents(__ROOT__ . __DESCRIPTIONS__), TRUE);
@@ -79,7 +54,6 @@ class RestFilters
                 if($value==='admingetvalues')
                     $value = 'admin_get_values';
                 break;
-                //if(is_string($value)){ return $value; } else { break; }
             case 'field_set': $value = isset($description[explode('.', $value)[1]]) ? $value : '';
                 break;
             case 'z': settype($value, 'string');
@@ -93,7 +67,7 @@ class RestFilters
                         'options' => $callback
                     ));
                 }  else {
-                    $value = NULL; /*return '';*/
+                    $value = NULL;
                 }
                 break;
         }
@@ -102,9 +76,6 @@ class RestFilters
     public static function scrubRestPairLiberal(&$value, $key, $invokable_descr_filter = 'DescriptionFilter')
     {
         $description = json_decode(file_get_contents(__ROOT__ . __DESCRIPTIONS__), true);
-        error_log('/test/controller/controller.php scrubGetPair $key: ' . print_r($key, true)
-                . ' $value: ' . print_r($value, true));
-        
         switch($key){
             case 'admin':
                 if($_SERVER['REQUEST_METHOD']=='POST'||$_SERVER['REQUEST_METHOD']=='PUT'||
@@ -136,7 +107,6 @@ class RestFilters
                     $collection['tables'] = $value;
                 else
                     $collection['tables'] = '';
-                error_log('controller.php scrubGetPair $key is "table." $collection: ' . print_r($collection, TRUE));
                 break;
             case 'tables': 
                 if(is_string($value)&&is_array(json_decode($value))
@@ -172,20 +142,18 @@ class RestFilters
                     $value = $value===1 ? TRUE : ($value===0 ? FALSE : $value);
                 $value = is_bool($value) ? $value : '';
                 break;
-            case 'x': error_log('controller.php case x value: ' . print_r($value, TRUE)
-                    . ' and is string: ' . print_r(is_string($value),TRUE));
+            case 'x': 
                 if($value==='admindescription')
                     $value = 'admin_description';
                 if($value==='admingetvalues')
                     $value = 'admin_get_values';
                 break;
-                //if(is_string($value)){ return $value; } else { break; }
             case 'field_set': $value = isset($description[explode('.', $value)[1]]) ? $value : '';
                 break;
             case 'z': settype($value, 'string');
                 $value = $value;
                 break;
-            default: error_log('/test/controller/controller.php ScrubGetPair case default');
+            default: 
                 if(isset($description[$key])){
                     error_log(' $key: ' . $key . ' and $value: ' . $value);
                     $callback = new $invokable_descr_filter($description[$key]['field_data']);
@@ -193,7 +161,7 @@ class RestFilters
                         'options' => $callback
                     ));
                 }  else {
-                    $value = NULL; /*return '';*/
+                    $value = NULL;
                 }
                 break;
         }
@@ -351,8 +319,6 @@ class Security
             );
             $answer['description'] = $osmosis_handler->permeate();
         }
-        error_log('osmosis after permeate $answer: ' . print_r($answer, TRUE));
-        error_log('osmosis after row_max and row_description blocks $answer: ' . print_r($answer, TRUE));
     }
 
     public function getRest()
@@ -375,11 +341,6 @@ class Security
         return $this->view_class;
     }
     
-    /*public static function getViewClass($target, array $server_array_copy)
-    {
-         //pending
-        return '';
-    }*/
 }
 
 interface Permeator
@@ -1288,4 +1249,196 @@ class User
     {
         return $this->user;
     }
+}
+
+class DBToRecordsCallable implements Controller
+{
+    private $rows = array();
+    private $position = 0;
+    private $wrapper;
+    public function __construct(Controller $wrapper)
+    {
+        $this->wrapper = $wrapper;
+    }
+    
+    public function __invoke()
+    {
+        $records = $this->getRecords();
+        foreach($records as $key => $value){
+            $this->unsetRecord($key);
+        }
+        for($i=0, $max=count($records);$i<$max;$i++){
+            $table = $records[$i]->toAssocArray();
+            if($table['name']===$this->getId()){
+                unset($table['name']);
+                unset($records[$i]);
+                $incumbent_key;
+                $cluster = array();
+                last($table);
+                for($max = is_int(key($table)) ? key($table) : count($table)-1; $max>-1; --$max){                
+                    if(!isset($incumbent_key)||$incumbent_key===$table[$max][key($table[$max])]){
+                        $cluster[] = $table[$max];
+                        $incumbent_key = $table[$max][key($table[$max])];
+                    } else {
+                        $incumbent_key = $table[$max][key($table[$max])];
+                        if(count($cluster)===1)
+                            $rows[$this->position++] = $cluster;
+                        else if(count($cluster)>1){
+                            $this->processCluster($cluster, $this->position++);
+                        }
+                        $cluster = [
+                                $table[$max]
+                            ];
+                    }
+                }
+            }
+                
+        }
+        for($i=0, $max=count($records);$i<$max;$i++){
+            $record = $records[$i]->toAssocArray();
+            $name = $record["name"];
+            unset($record["name"]);
+            $this->consolidateRows($this->rows, $record, $name);
+        }
+    }
+    
+    /**
+     * Updates single row of records, based on $postition, in $this->rows
+     * @throws {InvalidArgumentException}
+     * @param {Array<Object<string,(string|integer|float|Boolean|array)>>} $cluster
+     * @param {integer} $position
+     */
+    private function processCluster(array $cluster, $position)
+    {
+        $keys = array_keys($cluster[0]);
+        $row = array();
+        if(isset($cluster['name'])){
+            $name = $cluster['name'];
+            unset($cluster['name']);
+        } else
+            $name = "";
+        foreach($keys as $val){
+            $row[$name . $val] = array();
+        }
+        error_log('DbTableConsolidatedRows->processCluster $row: ' . print_r($row, TRUE)
+                . ' and $position: ' . print_r($position, TRUE));
+        $first_time_through = TRUE;
+        for($i=count($cluster) - 1;$i>-1;$i--){
+            if($first_time_through){
+                $cluster[$i] = array_reverse($cluster[$i]);
+                $first_time_through = FALSE;
+            }
+            error_log('$cluster[$i] before: ' . print_r($cluster[$i], TRUE)
+                    . ' and $row before: ' . print_r($row, TRUE));
+            for($clmn = count($cluster[0])-1; $clmn>-1; --$clmn){
+                list($column, $cell) = each($cluster[$i]);
+                $row[$name . $column][] = $cell;
+            }
+            error_log('$cluster[$i] after: ' . print_r($cluster[$i], TRUE)
+                    . ' and $row after: ' . print_r($row, TRUE));
+        }
+        foreach ($row as $key => $value) {
+            $value = array_unique($value);
+            if(count($value)===1)
+                $row[$key] = $value[0];
+            else
+                $row[$key] = $value;
+            $records = $this->getRecords();
+            if(isset($records[$position])){
+                $records[$position]->addend($key, new Record($value));
+                $this->setRecord($position, $records[$position]);
+            } else {
+                $r = new Record();
+                $r->addend($key, $value);
+                $this->setRecord(position, $r);
+            }
+        }
+        
+    }
+    
+    /**
+     * Updates all rows of records in $this->rows
+     * @param {Array<Object<string,(string|number|Boolean|array)>>} $rows
+     * @param {string} $name name of ModelCall to be concatenated to beginning of index
+     * @throws {InvalidArgumentException}
+     */
+    private function consolidateRows(array $rows, $name)
+    {
+        if(!is_string($name))
+            throw new InvalidArgumentException(__CLASS__ . __METHOD__ . " requires second"
+                    . " argument be a string of characters. Provided: " . print_r($name, TRUE));
+        last($rows);
+        $new_records = new SplFixedArray(count($rows[key($rows)]));
+        $columns = new SplFixedArray(count($rows[key($rows)]));
+        foreach($rows[key($rows)] as $cname => $cvalue){
+            $columns[$name . $cname] = array();
+        }
+        for($i=key($rows);$i>-1;$i--){
+            $row = $rows[$i];
+            foreach($row as $clmn => $cell){
+                $columns[$name . $clmn][] = $cell;
+            }
+        }
+        foreach($columns as $key => $value){
+            $new_records[$key] = array_unique($value);
+        }
+        $records = $this->getRecords();
+        last($records);
+        for($i=key($records);$i>-1;$i--){
+            foreach($new_records as $k => $set){
+                $this->setRecord($i, $records[$i]->addend($k, $set));
+            }
+        }
+    }
+
+    public function execute()
+    {
+        $this->invoke();
+    }
+
+    public function getId()
+    {
+        return $this->wrapper->getId();
+    }
+
+    public function getRecords()
+    {
+        return $this->wrapper->getRecords();
+    }
+
+    public function getRest()
+    {
+        return $this->wrapper->getRest();
+    }
+
+    public function getUser()
+    {
+        return $this->wrapper->getUser();
+    }
+
+    public function getViewClass()
+    {
+        return $this->wrapper->getViewClass();
+    }
+
+    public function isAuthorizationNeeded()
+    {
+        return $this->wrapper->isAuthorizationNeeded();
+    }
+
+    public function setRecord($index, \Record $record)
+    {
+        $this->wrapper->setRecord($index, $record);
+    }
+
+    public function setRest(\Rest $rest)
+    {
+        $this->wrapper->setRest($rest);
+    }
+
+    public function unsetRecord($index)
+    {
+        $this->wrapper->unsetRecord($index);
+    }
+
 }
